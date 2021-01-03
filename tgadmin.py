@@ -70,6 +70,8 @@ def timeMonitor(chat_id):
                 bot.send_message(chat_id, "Сегодня все молодцы и уже потренировались💪💪💪")
             else:
                 bot.send_message(chat_id, text)
+        if datetime.now().hour == 21 and reminded:
+            reminded = False
 
 
 @bot.message_handler(commands=['start', "/restart"])
