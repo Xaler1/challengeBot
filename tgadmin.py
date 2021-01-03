@@ -72,7 +72,7 @@ def timeMonitor(chat_id):
                 bot.send_message(chat_id, text)
         if datetime.now().hour == 21 and reminded:
             reminded = False
-        sleep(3600)
+        sleep(0.5)
 
 
 @bot.message_handler(commands=['start', "/restart"])
