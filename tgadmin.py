@@ -1,10 +1,13 @@
-import datetime
+from datetime import datetime
+from time import sleep
 
 import telebot
 
 from models import Users
 
-TB_BOT_TOKEN = "1411314976:AAHHsTGPIVOoQUlyIobwS1hZE-y1KoyQQ-Y"
+from threading import Thread
+
+TB_BOT_TOKEN = "1432792475:AAHAvDJiucpui_hPDyOLeGVtYCQJhMCbFFA"
 
 bot = telebot.TeleBot(TB_BOT_TOKEN)
 
@@ -12,11 +15,86 @@ taxes = {0: 0, 1: 30, 2: 95, 3: 195, 4: 330, 5: 500, 6: 705, 7: 945, 8: 1220, 9:
          13: 3055, 14: 3455, 15: 3855, 16: 4255, 17: 4655, 18: 5055, 19: 5455, 20: 5855, 21: 6255, 22: 6655, 23: 7055,
          24: 7455, 25: 7855, 26: 8255, 27: 8655, 28: 9055, 29: 9455}
 
+week_updated = False
+day_updated =False
+reminded = False
+week = 1
+start_day = -1
+
+def getDaysSinceTurnover():
+    today = datetime.now().weekday()
+    if today > start_day:
+        return  today - start_day
+    else:
+        return today + (7 - start_day)
+
+def timeMonitor(chat_id):
+    global week
+    while start_day != -1:
+        if datetime.now().weekday() == start_day and not week_updated:
+            week_updated = True
+            week += 1
+            bot.send_message(chat_id, "Пошла " + str(week) + "-ая неделя")
+            for user in Users.select().execute():
+                user.done_per_week = 0
+                user.fails_this_week = 0
+                user.save()
+        if datetime.now().weekday() != start_day and week_updated:
+            week_updated = False
+        if datetime.now().hour == 0 and datetime.now().minute == 0 and not day_updated:
+            day_updated = True
+            days_passed = getDaysSinceTurnover()
+            bot.send_message(chat_id, "День окончен.")
+            for user in Users.select().execute():
+                fails_this_week = days_passed - user.done_per_week - 2
+                if fails_this_week > user.fails_this_week:
+                    user.fails_this_week = fails_this_week
+                    user.fails += 1
+                    bot.send_message(chat_id, user.name + " забыл потренероваться!🤦‍♂️ Начислен штраф - " + str(taxes[user.fails] - taxes[user.fails - 1])
+                                     + "руб. (Общий - " + str(taxes[user.fails] + "руб.)"))
+            bot.send_message(chat_id, get_leaderboard())
+        if datetime.now().hour == 1 and day_updated:
+            day_updated = False
+        if datetime.now().hour == 20 and not reminded:
+            reminded = True
+            text = "Ежедневная напоминалка, кому еще надо потренероваться:\n"
+            i = 0
+            for user in Users.select().execute():
+                if user.last_trening != datetime.now().today():
+                    i += 1
+                    if getDaysSinceTurnover() - user.done_per_week >= 2:
+                        text += user.name + " - надо бы.\n"
+                    else:
+                        text += user.name + " - обязательно если не хочешь штраф.\n"
+            if i == 0:
+                bot.send_message(chat_id, "Сегодня все молодцы и уже потренировались💪💪💪")
+            else:
+                bot.send_message(chat_id, text)
+
 
 @bot.message_handler(commands=['start', "/restart"])
 def start(message):
-    pass
+    start_day = -1
+    week = 0
+    sleep(1)
+    start_day = datetime.now().weekday()
+    bot.send_message(message.chat.id, "Чэллендж начался, всем удачи!")
+    for user in Users.select().execute():
+        user.done_per_week = 0
+        user.done = 0
+        user.last_trening = -1
+        user.fails = 0
+        user.fails_this_week = 0
+        user.save()
+    week_updated = False
+    day_updated = True
+    reminded = False
+    bot_thread = Thread(target=timeMonitor, args=(message.chat.id, ))
+    bot_thread.start()
 
+@bot.message_handler(commands=['stop'])
+def stop(message):
+    bot.send_message(message.chat.id, "Сезон тренеровок окончен")
 
 @bot.message_handler(content_types=["photo"])
 def done(message):
@@ -27,7 +105,7 @@ def done(message):
         print("User created")
 
     if user.last_trening < datetime.date.today():
-        print("Comlete")
+        print("Complete")
         user.username = message.from_user.username
         user.last_trening = datetime.date.today()
         user.done_per_week += 1
@@ -42,7 +120,7 @@ def get_leaderboard():
     mes = "Лидер борд 👊🏼\n\n"
     day = datetime.date.today().weekday()
     for i, u in enumerate(Users.select().order_by(Users.done.desc()).execute()):
-        rest = 2 - (day - u.done_per_week)
+        rest = max(0, 2 - (getDaysSinceTurnover() - u.done_per_week))
         if u.fails:
             mes += f"{i + 1}. {u.name} - {u.done} [{rest}] (-{taxes[u.fails]})\n"
         else:
@@ -66,7 +144,7 @@ def text_mes(message):
 
     if message.from_user.id == 445330281 and message.text == "/weekEnd":
         for u in Users.select().execute():
-            u.fails += max(5 - u.done_per_week, 0)
+            u.fails += 5 - u.done_per_week, 0
             u.done_per_week = 0
             u.save()
         bot.send_message(message.chat.id, "Неделя обновлена.")

@@ -1,5 +1,4 @@
 import datetime
-import pickle
 
 from peewee import *
 from playhouse.postgres_ext import PostgresqlExtDatabase, ArrayField, JSONField
@@ -21,6 +20,7 @@ class Users(Model):
     done = IntegerField(default=0)
     done_per_week = IntegerField(default=0)
     fails = IntegerField(default=0)
+    fails_this_week = IntegerField(default=0)
     last_trening = DateField(default=lambda: datetime.date.today() - datetime.timedelta(days=1))
 
     class Meta:
