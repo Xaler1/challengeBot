@@ -5,8 +5,6 @@ import telebot
 
 from models import Users
 
-from threading import Thread
-
 TB_BOT_TOKEN = "1432792475:AAHAvDJiucpui_hPDyOLeGVtYCQJhMCbFFA"
 
 bot = telebot.TeleBot(TB_BOT_TOKEN)
