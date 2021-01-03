@@ -1,5 +1,5 @@
 from datetime import datetime
-from time import sleep
+import multiprocessing as mp
 
 import telebot
 
@@ -15,22 +15,21 @@ taxes = {0: 0, 1: 30, 2: 95, 3: 195, 4: 330, 5: 500, 6: 705, 7: 945, 8: 1220, 9:
          13: 3055, 14: 3455, 15: 3855, 16: 4255, 17: 4655, 18: 5055, 19: 5455, 20: 5855, 21: 6255, 22: 6655, 23: 7055,
          24: 7455, 25: 7855, 26: 8255, 27: 8655, 28: 9055, 29: 9455}
 
-week_updated = False
-day_updated =False
-reminded = False
-week = 1
-start_day = -1
+bot_process = None
 
-def getDaysSinceTurnover():
+def getDaysSinceTurnover(start_day):
     today = datetime.now().weekday()
     if today > start_day:
         return  today - start_day
     else:
         return today + (7 - start_day)
 
-def timeMonitor(chat_id):
-    global week
-    while start_day != -1:
+def timeMonitor(chat_id, start_day):
+    week = 0
+    week_updated = False
+    day_updated = True
+    reminded = False
+    while True:
         if datetime.now().weekday() == start_day and not week_updated:
             week_updated = True
             week += 1
@@ -50,6 +49,7 @@ def timeMonitor(chat_id):
                 if fails_this_week > user.fails_this_week:
                     user.fails_this_week = fails_this_week
                     user.fails += 1
+                    user.save()
                     bot.send_message(chat_id, user.name + " забыл потренероваться!🤦‍♂️ Начислен штраф - " + str(taxes[user.fails] - taxes[user.fails - 1])
                                      + "руб. (Общий - " + str(taxes[user.fails] + "руб.)"))
             bot.send_message(chat_id, get_leaderboard())
@@ -72,15 +72,13 @@ def timeMonitor(chat_id):
                 bot.send_message(chat_id, text)
         if datetime.now().hour == 21 and reminded:
             reminded = False
-        sleep(0.5)
 
 
 @bot.message_handler(commands=['start', "/restart"])
 def start(message):
-    start_day = -1
-    week = 0
-    sleep(1)
-    start_day = datetime.now().weekday()
+    global bot_process
+    if bot_process != None:
+        bot_process.kill()
     bot.send_message(message.chat.id, "Чэллендж начался, всем удачи!")
     for user in Users.select().execute():
         user.done_per_week = 0
@@ -89,11 +87,9 @@ def start(message):
         user.fails = 0
         user.fails_this_week = 0
         user.save()
-    week_updated = False
-    day_updated = True
-    reminded = False
-    bot_thread = Thread(target=timeMonitor, args=(message.chat.id, ))
-    bot_thread.start()
+    bot_process = mp.Process(target=timeMonitor, args=(message.chat.id, datetime.now().weekday() ))
+    bot_process.start()
+    bot_process.join()
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
