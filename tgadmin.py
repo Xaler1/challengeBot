@@ -76,7 +76,7 @@ def timeMonitor(chat_id, start_day):
 def start(message):
     global bot_process
     if bot_process != None:
-        bot_process.kill()
+        bot_process.terminate()
     bot.send_message(message.chat.id, "Чэллендж начался, всем удачи!")
     for user in Users.select().execute():
         user.done_per_week = 0
@@ -86,6 +86,7 @@ def start(message):
         user.fails_this_week = 0
         user.save()
     bot_process = mp.Process(target=timeMonitor, args=(message.chat.id, datetime.now().weekday() ))
+    bot_process.daemon = True
     bot_process.start()
     bot_process.join()
 
