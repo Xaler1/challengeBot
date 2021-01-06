@@ -1,23 +1,29 @@
 from datetime import datetime
 import multiprocessing as mp
-
 import telebot
-
-from models import Users
+from models import User
+import pickle
+from os import path
 
 TB_BOT_TOKEN = "1432792475:AAHAvDJiucpui_hPDyOLeGVtYCQJhMCbFFA"
 
 bot = telebot.TeleBot(TB_BOT_TOKEN)
 queue = mp.Queue()
+active = False
 
-taxes = {0: 0, 1: 30, 2: 95, 3: 195, 4: 330, 5: 500, 6: 705, 7: 945, 8: 1220, 9: 1530, 10: 1875, 11: 2255, 12: 2655,
-         13: 3055, 14: 3455, 15: 3855, 16: 4255, 17: 4655, 18: 5055, 19: 5455, 20: 5855, 21: 6255, 22: 6655, 23: 7055,
-         24: 7455, 25: 7855, 26: 8255, 27: 8655, 28: 9055, 29: 9455}
+def save(users):
+    pickle.dump(users, open("users.pkl", "wb"))
+
+def getFine(times):
+    if times == 0:
+        return 0
+    else:
+        return getFine(times - 1) + times * 35 - 5
 
 def getDaysSinceTurnover(start_day):
     today = datetime.now().weekday()
     if today > start_day:
-        return  today - start_day
+        return today - start_day
     else:
         return today + (7 - start_day)
 
@@ -34,7 +40,7 @@ def timeMonitor(queue):
             result = queue.get()
             if isinstance(result, int):
                 chat_id = result
-                start_day = datetime.now().weekday()
+                start_day = pickle.load(open("start.pkl", "rb"))
                 week = 0
                 week_updated = False
                 day_updated = True
@@ -45,24 +51,28 @@ def timeMonitor(queue):
                 week_updated = True
                 week += 1
                 bot.send_message(chat_id, "Пошла " + str(week) + "-ая неделя")
-                for user in Users.select().execute():
+                users = pickle.load(open("users.pkl", "rb"))
+                for user in users:
                     user.done_per_week = 0
                     user.fails_this_week = 0
-                    user.save()
+                save(users)
             if datetime.now().weekday() != start_day and week_updated:
                 week_updated = False
             if datetime.now().hour == 0 and datetime.now().minute == 0 and not day_updated:
                 day_updated = True
-                days_passed = getDaysSinceTurnover()
+                days_passed = getDaysSinceTurnover(pickle.load(open("start.pkl", "rb")))
                 bot.send_message(chat_id, "День окончен.")
-                for user in Users.select().execute():
+                users = pickle.load(open("users.pkl", "rb"))
+                for user in users:
+                    if user.sick:
+                        user.done_per_week += 1
                     fails_this_week = days_passed - user.done_per_week - 2
                     if fails_this_week > user.fails_this_week:
                         user.fails_this_week = fails_this_week
                         user.fails += 1
-                        user.save()
-                        bot.send_message(chat_id, user.name + " забыл потренероваться!🤦‍♂️ Начислен штраф - " + str(taxes[user.fails] - taxes[user.fails - 1])
-                                         + "руб. (Общий - " + str(taxes[user.fails] + "руб.)"))
+                        bot.send_message(chat_id, user.name + " забыл потренероваться!🤦‍♂️ Начислен штраф - " + str(getFine(user.fails) - getFine(user.fails - 1))
+                                         + "руб. (Общий - " + str(getFine(user.fails) + "руб.)"))
+                save(users)
                 bot.send_message(chat_id, get_leaderboard())
             if datetime.now().hour == 1 and day_updated:
                 day_updated = False
@@ -70,11 +80,14 @@ def timeMonitor(queue):
                 reminded = True
                 text = "Ежедневная напоминалка, кому еще надо потренероваться:\n"
                 i = 0
-                for user in Users.select().execute():
-                    if user.last_trening != datetime.now().today():
+                for user in pickle.load(open("users.pkl", "rb")):
+                    if user.sick:
                         i += 1
-                        if getDaysSinceTurnover() - user.done_per_week >= 2:
-                            text += user.name + " - надо бы.\n"
+                        text += user.name + " - выздоравливай."
+                    elif user.last_trening != datetime.now().today():
+                        i += 1
+                        if getDaysSinceTurnover(start_day) - user.done_per_week >= 2:
+                            text += user.name + " - неплохо бы.\n"
                         else:
                             text += user.name + " - обязательно если не хочешь штраф.\n"
                 if i == 0:
@@ -84,96 +97,152 @@ def timeMonitor(queue):
             if datetime.now().hour == 21 and reminded:
                 reminded = False
             if not queue.empty():
-                if isinstance(queue.get(), str):
+                if isinstance(queue.get, str):
                     active = False
-
 
 @bot.message_handler(commands=['start'])
 def start(message):
-    bot.send_message(message.chat.id, "Чэллендж начался, всем удачи!")
-    #for user in Users.select().execute():
-        #user.done_per_week = 0
-        #user.done = 0
-        #user.last_trening = -1
-        #user.fails = 0
-        #user.fails_this_week = 0
-        #user.save()
-    queue.put(message.chat.id)
+    global active
+    if not active:
+        pickle.dump(datetime.now().weekday(), open("start.pkl", "wb"))
+        save([])
+        bot.send_message(message.chat.id, "Чэллендж начался!")
+        queue.put(message.chat.id)
+        active = True
+    else:
+        bot.send_message(message.chat.id, "Челлендж уже запущен.")
+
+
+@bot.message_handler(commands=['resume'])
+def resume(message):
+    global active
+    if path.exists("start.pkl"):
+        if not active:
+            users = pickle.load(open("users.pkl", "rb"))
+            bot.send_message(message.chat.id, "Возобноляю челлендж.")
+            queue.put(message.chat.id)
+            active = True
+        else:
+            bot.send_message(message.chat.id, "Челлендж уже запущен.")
+    else:
+        bot.send_message(message.chat.id, "Челлендж еще ни разу не был запущен.")
 
 @bot.message_handler(commands=['stop'])
 def stop(message):
-    bot.send_message(message.chat.id, "Сезон тренеровок окончен")
-    queue.put("stop")
+    global active
+    if active:
+        bot.send_message(message.chat.id, "Челлендж окончен.")
+        queue.put("stop")
+        active = False
+    else:
+        bot.send_message(message.chat.id, "Челлендж не запущен.")
+
+@bot.message_handler(commands=['sick'])
+def sick(message):
+    if active:
+        users = pickle.load(open("users.pkl", "rb"))
+        user = next((u for u in users if u.tel_id == message.from_user.id), None)
+        if user == None:
+            bot.send_message(message.chat.id, "Вы еще не выполнили ни одной тренеровки!")
+        else:
+            if not user.sick:
+                user.sick = True
+                bot.send_message(message.chat.id, user.name + ", вы теперь больной.")
+            else:
+                bot.send_message(message.chat.id, user.name + ", вы и так больной.")
+        save(users)
+
+@bot.message_handler(commands=['notsick'])
+def sick(message):
+    if active:
+        users = pickle.load(open("users.pkl", "rb"))
+        user = next((u for u in users if u.tel_id == message.from_user.id), None)
+        if user == None:
+            bot.send_message(message.chat.id, "Вы еще не выполнили ни одной тренеровки!")
+        else:
+            if user.sick:
+                user.sick = False
+                bot.send_message(message.chat.id, user.name + ", вы больше не больной.")
+            else:
+                bot.send_message(message.chat.id, user.name + ", вы и так не больной.")
+        save(users)
+
+@bot.message_handler(commands=['fines'])
+def fines(message):
+    users = pickle.load(open("users.pkl", "rb"))
+    text = "Разбивка кто кому сколько должен:\n"
+    total = 0
+    for user in users:
+        total += user.done
+    for user in users:
+        total -= user.done
+        text += user.name + " должен:\n"
+        for other_user in users:
+            if other_user.tel_id != user.tel_id:
+                text += str((getFine(user.fails) / total) * other_user.done) + "руб. - " + other_user.name + "\n"
+    bot.send_message(message.chat.id, text)
+
+@bot.message_handler(commands=["help", "commands"])
+def help(message):
+    text = "Список команд:\n" \
+           "/start - начать чэллендж\n" \
+           "/stop - остановить челлендж\n" \
+           "/resume - возобновить чэллендж\n" \
+           "/sick - отметиться как на больничном\n" \
+           "/notsick - отметиться как не на боьничном\n" \
+           "/leaderboard - показать лидерборд\n" \
+           "/fines - посмотреть кто кому сколько должен"
+    bot.send_message(message.chat.id, text)
 
 @bot.message_handler(content_types=["photo"])
 def done(message):
-    print("photo")
-    user = Users.get_or_none(Users.tel_id == message.from_user.id)
-    if not user:
-        user = Users.get_or_create(name=message.from_user.first_name, tel_id=message.from_user.id)
-        print("User created")
+    if active:
+        users = pickle.load(open("users.pkl", "rb"))
+        user = next((u for u in users if u.tel_id == message.from_user.id), None)
+        if user == None:
+            users.append(User(tel_id=message.from_user.id, name=message.from_user.first_name, done_per_week=getDaysSinceTurnover(pickle.load(open("start.pkl", "rb")) - 1) - 1))
+            user = users[-1]
+            bot.send_message(message.chat.id, user.name + " был зарегестрирован.")
 
-    if user.last_trening < datetime.date.today():
-        print("Complete")
-        user.username = message.from_user.username
-        user.last_trening = datetime.date.today()
-        user.done_per_week += 1
-        user.done += 1
-        user.save()
-        bot.reply_to(message, f"Тренировка засчитана! Всего выполнено: {user.done}")
+        if user.last_training != datetime.now().day:
+            if user.sick:
+                bot.reply_to(message, "Видимо вы больше не больны.")
+                user.sick = False
+            user.last_training = datetime.now().day
+            user.done_per_week += 1
+            user.done += 1
+            bot.reply_to(message, f"Тренировка засчитана! Всего выполнено: {user.done}")
+        else:
+            bot.reply_to(message, f"2 раза за день перебор) Всего выполнено: {user.done}")
+        save(users)
     else:
-        bot.reply_to(message, f"2 раза за день перебор) Всего выполнено: {user.done}")
+        bot.reply_to(message, "Челлендж еще не был запущен")
 
 
 def get_leaderboard():
     mes = "Лидер борд 👊🏼\n\n"
-    day = datetime.date.today().weekday()
-    for i, u in enumerate(Users.select().order_by(Users.done.desc()).execute()):
-        rest = max(0, 2 - (getDaysSinceTurnover() - u.done_per_week))
-        if u.fails:
-            mes += f"{i + 1}. {u.name} - {u.done} [{rest}] (-{taxes[u.fails]})\n"
+    users = pickle.load(open("users.pkl", "rb"))
+    for i, user in enumerate(users):
+        rest = max(0, 2 - (getDaysSinceTurnover(pickle.load(open("start.pkl", "rb")) - 1) - user.done_per_week))
+        if user.fails:
+            mes += f"{i + 1}. {user.name} - {user.done} [{rest}] (-{getFine(user.fails)})"
         else:
-            mes += f"{i + 1}. {u.name} - {u.done} [{rest}] 💪\n"
-
-        print(u.name, u.tel_id)
+            mes += f"{i + 1}. {user.name} - {user.done} [{rest}] 💪"
+        if user.sick:
+            mes += " - на больничном \n"
+        else:
+            mes += "\n"
     return mes
 
 
-@bot.message_handler(content_types=["text"])
+@bot.message_handler(commands=['leaderboard'])
 def text_mes(message):
-    if message.text == "/leaderboard":
-        bot.send_message(message.chat.id, get_leaderboard())
+    bot.send_message(message.chat.id, get_leaderboard())
 
-    if message.from_user.id == 445330281 and message.text == "/alarm":
-        text = "Напомню, что вам нужно сделать сегодня тренировочку: "
-        for u in Users.select().execute():
-            if u.last_trening < datetime.date.today() and u.username:
-                text += f"@{u.username} "
-        bot.send_message(message.chat.id, text)
-
-    if message.from_user.id == 445330281 and message.text == "/weekEnd":
-        for u in Users.select().execute():
-            u.fails += 5 - u.done_per_week, 0
-            u.done_per_week = 0
-            u.save()
-        bot.send_message(message.chat.id, "Неделя обновлена.")
-        bot.send_message(message.chat.id, get_leaderboard())
-
-    print(message.text, message.from_user.id)
 
 
 if __name__ == "__main__":
-    # tasks = {}
-    # sum = 0
-    # delt = 30
-    # for t in range(30):
-    #     tasks[t] = sum
-    #     sum += delt
-    #     delt += 35
-    #     delt = min(delt, 400)
-    # print(tasks)
     print("Start")
-    bot_process = None
     bot_process = mp.Process(target=timeMonitor, args=(queue, ))
     bot_process.daemon = True
     bot_process.start()
