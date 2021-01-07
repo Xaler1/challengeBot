@@ -203,7 +203,7 @@ def done(message):
             user = users[-1]
             bot.send_message(message.chat.id, user.name + " был зарегестрирован.")
 
-        if user.last_training != datetime.now().day:
+        if not user.done_today:
             if user.sick:
                 bot.reply_to(message, "Видимо вы больше не больны.")
                 user.sick = False
