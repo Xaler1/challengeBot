@@ -4,12 +4,15 @@ import telebot
 from models import User
 import pickle
 from os import path
+import re
 
 TB_BOT_TOKEN = "1432792475:AAHAvDJiucpui_hPDyOLeGVtYCQJhMCbFFA"
 
 bot = telebot.TeleBot(TB_BOT_TOKEN)
 queue = mp.Queue()
 active = False
+phone_pattern = re.compile("(?:\+7|8)[0-9]{10}")
+
 
 def save(users):
     pickle.dump(users, open("users.pkl", "wb"))
@@ -23,7 +26,7 @@ def getFine(times):
 def timeMonitor(queue):
     chat_id = 0
     start_day = 0
-    week = 0
+    week = 1
     week_updated = False
     day_updated = False
     reminded = False
@@ -40,7 +43,7 @@ def timeMonitor(queue):
                 reminded = False
                 active = True
         while active:
-            if datetime.now().weekday() == start_day and not week_updated:
+            if datetime.now().hour == 0 and datetime.now().weekday() == start_day and not week_updated:
                 week_updated = True
                 week += 1
                 bot.send_message(chat_id, "Пошла " + str(week) + "-ая неделя")
@@ -50,7 +53,7 @@ def timeMonitor(queue):
                 save(users)
             if datetime.now().weekday() != start_day and week_updated:
                 week_updated = False
-            if datetime.now().hour == 0 and not day_updated:
+            if datetime.now().hour == 21 and not day_updated:
                 day_updated = True
                 bot.send_message(chat_id, "День окончен.")
                 users = pickle.load(open("users.pkl", "rb"))
@@ -82,7 +85,7 @@ def timeMonitor(queue):
                         if user.rests > 0:
                             text += user.name + " - неплохо бы.\n"
                         else:
-                            text += user.name + " - обязательно если не хочешь штраф.\n"
+                            text += "@" + user.username + " - обязательно если не хочешь штраф.\n"
                 if i == 0:
                     bot.send_message(chat_id, "Сегодня все молодцы и уже потренировались💪💪💪")
                 else:
@@ -170,7 +173,7 @@ def fines(message):
         total += user.done
     for user in users:
         if user.fails > 0:
-            text += user.name + " должен:\n"
+            text += user.name + "(" + user.phone + " " + user.bank + ")" + " должен:\n"
             for other_user in users:
                 if other_user.tel_id != user.tel_id:
                     Iowe = round((other_user.done / (total - user.done)) * getFine(user.fails))
@@ -195,6 +198,25 @@ def simpleFines(message):
        text += str(round(total_money * (user.done/total_ex))) + "руб. - " + user.name + "\n"
     bot.send_message(message.chat.id, text)
 
+@bot.message_handler(commands=['setphone'])
+def setPhone(message):
+    parts = message.text.split(" ")
+    if len(parts) == 3:
+        if phone_pattern.match(parts[1]):
+            users = pickle.load(open("users.pkl", "rb"))
+            user = next((u for u in users if u.tel_id == message.from_user.id), None)
+            if user != None:
+                user.phone = parts[1]
+                user.bank = parts[2]
+                bot.reply_to(message, "Номер телефона и банк сохранен ")
+                save(users)
+            else:
+                bot.reply_to(message, "Вы еще не зарагестрированы в челлендже.")
+        else:
+            bot.reply_to(message, "Неправильный формат телефона.")
+    else:
+        bot.reply_to(message, "Неправильный формат ввода.")
+
 @bot.message_handler(commands=["help", "commands"])
 def help(message):
     text = "Список команд:\n" \
@@ -204,7 +226,8 @@ def help(message):
            "/sick - отметиться как на больничном\n" \
            "/notsick - отметиться как не на боьничном\n" \
            "/leaderboard - показать лидерборд\n" \
-           "/fines - посмотреть кто кому сколько должен"
+           "/fines - посмотреть кто кому сколько должен\n" \
+           "/setphone <телефон> <банк> - установить свой телефон и банк"
     bot.send_message(message.chat.id, text)
 
 @bot.message_handler(content_types=["photo"])
@@ -213,7 +236,7 @@ def done(message):
         users = pickle.load(open("users.pkl", "rb"))
         user = next((u for u in users if u.tel_id == message.from_user.id), None)
         if user == None:
-            users.append(User(tel_id=message.from_user.id, name=message.from_user.first_name))
+            users.append(User(tel_id=message.from_user.id, name=message.from_user.first_name, username=message.from_user.username))
             user = users[-1]
             bot.send_message(message.chat.id, user.name + " был зарегестрирован.")
 
@@ -227,8 +250,6 @@ def done(message):
         else:
             bot.reply_to(message, f"2 раза за день перебор) Всего выполнено: {user.done}")
         save(users)
-    else:
-        bot.reply_to(message, "Челлендж еще не был запущен")
 
 
 def get_leaderboard():

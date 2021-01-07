@@ -1,11 +1,14 @@
 import datetime
 
 class User():
-    def __init__(self, tel_id, name):
+    def __init__(self, tel_id, name, username):
         self.tel_id = tel_id
         self.name = name
+        self.username = username
         self.done = 0
         self.done_today = False
         self.rests = 2
         self.fails = 0
         self.sick = False
+        self.phone = "????????"
+        self.bank = "??????"
