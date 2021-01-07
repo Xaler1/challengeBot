@@ -181,6 +181,20 @@ def fines(message):
             text += user.name + " никому ничего не должен\n"
     bot.send_message(message.chat.id, text)
 
+@bot.message_handler(commands=['sfines'])
+def simpleFines(message):
+    users = pickle.load(open("users.pkl", "rb"))
+    users.sort(key=lambda x: x.done, reverse=True)
+    text = "Разбивка кому сколько из общего банка:\n"
+    total_ex = 0
+    total_money = 0
+    for user in users:
+        total_ex += user.done
+        total_money += getFine(user.fails)
+    for user in users:
+       text += str(round(total_money * (user.done/total_ex))) + "руб. - " + user.name + "\n"
+    bot.send_message(message.chat.id, text)
+
 @bot.message_handler(commands=["help", "commands"])
 def help(message):
     text = "Список команд:\n" \
