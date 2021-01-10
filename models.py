@@ -1,14 +1,22 @@
 import datetime
+from peewee import *
+from playhouse.postgres_ext import PostgresqlExtDatabase, ArrayField, JSONField
+import config
 
-class User():
-    def __init__(self, tel_id, name, username):
-        self.tel_id = tel_id
-        self.name = name
-        self.username = username
-        self.done = 0
-        self.done_today = False
-        self.rests = 2
-        self.fails = 0
-        self.sick = False
-        self.phone = "????????"
-        self.bank = "??????"
+db = PostgresqlExtDatabase(config.dbname, user=config.dbuser, password=config.dbpass,
+                           host=config.dbhost, port=5432)
+
+class Users(Model):
+    tel_id = BigIntegerField(unique=True);
+    name = TextField(default="")
+    username = TextField(default="")
+    done = IntegerField(default=0)
+    done_today = BooleanField(default=False)
+    rests = IntegerField(default=2)
+    fails = IntegerField(default=0)
+    sick = BooleanField(default=False)
+    phone = TextField(default="")
+    bank = TextField(default="")
+
+    class Meta:
+        database = db
