@@ -5,6 +5,8 @@ from models import Users
 import pickle
 from os import path
 import re
+from PIL import Image
+import pytesseract as pts
 
 TB_BOT_TOKEN = "1432792475:AAHAvDJiucpui_hPDyOLeGVtYCQJhMCbFFA"
 
@@ -12,7 +14,38 @@ bot = telebot.TeleBot(TB_BOT_TOKEN)
 queue = mp.Queue()
 active = False
 phone_pattern = re.compile("(?:\+7|8)[0-9]{10}")
+time_pattern = re.compile("^[0-9]{1,2}:([0-9]{2}){1,2}$")
+date_pattern = re.compile("^[0-9]{1,2}([.][0-9]{1,4}){1,2}$")
+stime_pattern = re.compile("^[0-9]{1,2}$")
 
+def recognise(img):
+    #pts.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract'
+    times = []
+    data = re.findall(r"[\S']+", pts.image_to_string(img, lang='rus', config='--psm 6'))
+    for i in range(len(data) - 1):
+        #print(data[i])
+        if time_pattern.match(data[i].strip()) and data[i + 1].lower().find("рм") == -1 and data[i + 1].lower().find(
+                "ам") == -1 and not date_pattern.match(data[i - 1]):
+            #print(time_pattern)
+            times.append(data[i])
+        if stime_pattern.match(data[i]) and data[i - 2].lower() == "мин":
+            #print(data[i])
+            times.append(data[i])
+
+    if len(times) == 0:
+        return "хз"
+    elif len(times) > 1:
+        parts = times[1].split(":")
+        if len(parts) == 3:
+            return parts[1] + "мин"
+        else:
+            return parts[0] + "мин"
+    else:
+        parts = times[0].split(":")
+        if len(parts) == 3:
+            return parts[1] + " мин"
+        else:
+            return parts[0] + " мин"
 
 def getFine(times):
     if times == 0:
@@ -34,7 +67,7 @@ def timeMonitor(queue):
             if isinstance(result, int):
                 chat_id = result
                 start_day = pickle.load(open("start.pkl", "rb"))
-                week = 0
+                week = 1
                 week_updated = False
                 day_updated = False
                 reminded = False
@@ -59,15 +92,16 @@ def timeMonitor(queue):
                                 user.fails += 1
                                 bot.send_message(chat_id,
                                                  user.name + " забыл потренероваться!🤦‍♂️ Начислен штраф - " + str(getFine(user.fails) - getFine(user.fails - 1))
-                                                 + "руб. (Общий - " + str(getFine(user.fails) + "руб.)"))
+                                                 + "руб. (Общий - " + str(getFine(user.fails)) + "руб.)")
                             else:
                                 user.rests -= 1
                     user.done_today = False
                     user.save()
                 bot.send_message(chat_id, get_leaderboard())
-            if datetime.now().hour == 1 and day_updated:
+            if datetime.now().hour == 22 and day_updated:
+                print("Resetting day update")
                 day_updated = False
-            if datetime.now().hour == 20 and datetime.now().minute == 30 and not reminded:
+            if datetime.now().hour == 20 and not reminded:
                 reminded = True
                 text = "Ежедневная напоминалка, кому еще надо потренероваться:\n"
                 i = 0
@@ -78,14 +112,21 @@ def timeMonitor(queue):
                     elif not user.done_today:
                         i += 1
                         if user.rests > 0:
-                            text += user.name + " - неплохо бы.\n"
+                            if user.username != None:
+                                text += "@" + user.username + " - неплохо бы.\n"
+                            else:
+                                text += "@" + user.name + " - неплохо бы.\n"
                         else:
-                            text += "@" + user.username + " - обязательно если не хочешь штраф.\n"
+                            if user.username != None:
+                                text += "@" + user.username + " - обязательно если не хочешь штраф.\n"
+                            else:
+                                text += "@" + user.name + " - обязательно если не хочешь штраф.\n"
                 if i == 0:
                     bot.send_message(chat_id, "Сегодня все молодцы и уже потренировались💪💪💪")
                 else:
                     bot.send_message(chat_id, text)
             if datetime.now().hour == 21 and reminded:
+                print("Resetting reminder")
                 reminded = False
             if not queue.empty():
                 if isinstance(queue.get, str):
@@ -226,7 +267,7 @@ def done(message):
         if user == None:
             Users.create(tel_id=message.from_user.id, name=message.from_user.first_name, username=message.from_user.username)
             user = Users.get(tel_id=message.from_user.id)
-            bot.send_message(message.chat.id, user.name + " был зарегестрирован.")
+            bot.send_message(message.chat.id, user.name + " был зарегистрирован.")
 
         if not user.done_today:
             if user.sick:
@@ -236,6 +277,13 @@ def done(message):
             user.done += 1
             user.save()
             bot.reply_to(message, f"Тренировка засчитана! Всего выполнено: {user.done}")
+            fileID = message.photo[-1].file_id
+            file = bot.get_file(fileID)
+            downloaded = bot.download_file(file.file_path)
+            new_img = open("received_img.jpg", "wb")
+            new_img.write(downloaded)
+            new_img.close()
+            bot.reply_to(message, f"Предположитнльная продлжительность: {recognise(Image.open('received_img.jpg'))}.")
         else:
             bot.reply_to(message, f"2 раза за день перебор) Всего выполнено: {user.done}")
 
