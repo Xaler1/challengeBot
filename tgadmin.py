@@ -214,7 +214,7 @@ def fines(message):
                     if Iowe > TheyOwe:
                         text += str(Iowe - TheyOwe) + "руб. - " + other_user.name + "\n"
         else:
-            text += user.name + " никому ничего не должен\n"
+            text += user.name + "(" + user.phone + " " + user.bank + ")" + " никому ничего не должен\n"
     bot.send_message(message.chat.id, text)
 
 @bot.message_handler(commands=['sfines'])
